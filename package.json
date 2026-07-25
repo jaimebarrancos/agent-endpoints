@@ -14,7 +14,9 @@
     "agent": "tsx client/agent.ts",
     "client_check_health": "tsx client/client_check_health.ts",
     "client_rebalance": "tsx client/client_rebalance.ts",
-    "test_settlement": "tsx scripts/test_x402_settlement.ts"
+    "test_settlement": "tsx scripts/test_x402_settlement.ts",
+    "client_copy_trade": "tsx client/client_copy_trade.ts",
+    "client_create_position": "tsx client/client_create_position.ts"
   },
   "dependencies": {
     "@x402/evm": "^2.19.0",

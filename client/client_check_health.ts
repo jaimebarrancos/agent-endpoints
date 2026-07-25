@@ -54,7 +54,7 @@ async function runCheckHealthClient() {
     console.log(`  ETH:  ${formatEther(initialBalances.ethBal)} ETH`);
     console.log(`  USDC: $${(Number(initialBalances.usdcBal) / 1e6).toFixed(6)} USDC`);
 
-    console.log('\n[Client] Requesting /check-health with x402 payment...');
+    console.log('\n[Client] Requesting /check-health with x402 payment (tickBuffer: 10, timeBuffer: 300s)...');
     try {
         const response = await fetchWithPayment('http://localhost:3000/check-health', {
             method: 'POST',
@@ -62,6 +62,8 @@ async function runCheckHealthClient() {
             body: JSON.stringify({
                 account: targetAccount,
                 network: 'base-mainnet',
+                tickBuffer: 10,  // Allow 10-tick price boundary margin
+                timeBuffer: 300, // Require 300s (5m) duration out of range before declaring unhealthy
             }),
         });
 

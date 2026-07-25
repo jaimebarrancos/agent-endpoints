@@ -73,6 +73,8 @@ async function runAutonomousAgent() {
             body: JSON.stringify({
                 account: targetAccount,
                 network: 'base-mainnet',
+                tickBuffer: 10,
+                timeBuffer: 300,
             }),
         });
 

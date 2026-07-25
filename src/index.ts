@@ -5,8 +5,9 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
 import { decodePaymentSignatureHeader } from '@x402/core/http';
 import * as Constants from '../constants.ts';
-import { checkUniswapPositionsHealth } from './subgraph.ts';
+import { checkUniswapPositionsHealth, getCopyTradingIntelligence } from './subgraph.ts';
 import { rebalancePosition } from './rebalance.ts';
+import { createPosition } from './create_position.ts';
 
 const app: Express = express();
 app.use(express.json());
@@ -84,7 +85,7 @@ const x402PaymentMiddleware = async (req: Request, res: Response, next: NextFunc
                     scheme: 'exact',
                     network: 'eip155:8453',
                     asset: Constants.USDC_ADDRESS_MAINNET,
-                    amount: '10000', // 0.01 USDC (6 decimals)
+                    amount: '1000', // 0.01 USDC (6 decimals)
                     payTo: SERVER_PAYMENT_ADDRESS,
                     maxTimeoutSeconds: 3600,
                     extra: {
@@ -168,6 +169,27 @@ const handleCheckHealth = async (req: Request, res: Response) => {
 
         const network = ((req.query.network || req.body?.network) as string) || 'base-mainnet';
 
+        const tickBuffer =
+            req.query.tickBuffer !== undefined
+                ? Number(req.query.tickBuffer)
+                : req.body?.tickBuffer !== undefined
+                ? Number(req.body.tickBuffer)
+                : undefined;
+
+        const timeBuffer =
+            req.query.timeBuffer !== undefined
+                ? Number(req.query.timeBuffer)
+                : req.body?.timeBuffer !== undefined
+                ? Number(req.body.timeBuffer)
+                : undefined;
+
+        const lastOutOfRangeTimestamp =
+            req.query.lastOutOfRangeTimestamp !== undefined
+                ? Number(req.query.lastOutOfRangeTimestamp)
+                : req.body?.lastOutOfRangeTimestamp !== undefined
+                ? Number(req.body.lastOutOfRangeTimestamp)
+                : undefined;
+
         if (!account) {
             res.status(400).json({
                 error: 'Missing required parameter "account". Provide ?account=0x... or JSON body {"account": "0x..."}',
@@ -175,8 +197,13 @@ const handleCheckHealth = async (req: Request, res: Response) => {
             return;
         }
 
-        console.log(`[Server] Checking health for account: ${account} on network: ${network}`);
-        const health = await checkUniswapPositionsHealth(account, { network });
+        console.log(`[Server] Checking health for account: ${account} on network: ${network} (tickBuffer: ${tickBuffer ?? 0}, timeBuffer: ${timeBuffer ?? 0}s)`);
+        const health = await checkUniswapPositionsHealth(account, {
+            network,
+            tickBuffer,
+            timeBuffer,
+            lastOutOfRangeTimestamp,
+        });
         res.json(health);
     } catch (err: any) {
         console.error('Error checking position health:', err);
@@ -223,6 +250,92 @@ const handleRebalance = async (req: Request, res: Response) => {
     }
 };
 
+const handleCopyIntelligence = async (req: Request, res: Response) => {
+    try {
+        const account = (
+            req.query.account ||
+            req.body?.account ||
+            req.query.wallet ||
+            req.body?.wallet
+        ) as string | undefined;
+
+        const network = ((req.query.network || req.body?.network) as string) || 'base-mainnet';
+        console.log(`[Server] Generating copy trading intelligence feed for network: ${network}`);
+        const intelligence = await getCopyTradingIntelligence({ network });
+
+        let preparedTransactions: any[] = [];
+        if (account && intelligence.suggestedRange) {
+            console.log(`[Server] Generating non-custodial copy trade transaction bundle for account: ${account}`);
+            const copyPositionResult = await createPosition({
+                account,
+                network,
+                tickLower: intelligence.suggestedRange.tickLower,
+                tickUpper: intelligence.suggestedRange.tickUpper,
+            });
+            preparedTransactions = copyPositionResult.preparedTransactions;
+        }
+
+        res.json({
+            ...intelligence,
+            account,
+            preparedTransactions,
+        });
+    } catch (err: any) {
+        console.error('Error generating copy trading intelligence feed:', err);
+        res.status(500).json({
+            error: 'Failed to generate copy trading intelligence feed',
+            details: err?.message || String(err),
+        });
+    }
+};
+
+const handleCreatePosition = async (req: Request, res: Response) => {
+    try {
+        const account = (
+            req.query.account ||
+            req.body?.account ||
+            req.query.wallet ||
+            req.body?.wallet
+        ) as string | undefined;
+
+        const network = ((req.query.network || req.body?.network) as string) || 'base-mainnet';
+
+        const rangeWidth =
+            req.query.rangeWidth !== undefined
+                ? Number(req.query.rangeWidth)
+                : req.body?.rangeWidth !== undefined
+                ? Number(req.body.rangeWidth)
+                : undefined;
+
+        const amount0Desired = (req.query.amount0Desired || req.body?.amount0Desired) as string | undefined;
+        const amount1Desired = (req.query.amount1Desired || req.body?.amount1Desired) as string | undefined;
+
+        if (!account) {
+            res.status(400).json({
+                error: 'Missing required parameter "account". Provide ?account=0x... or JSON body {"account": "0x..."}',
+            });
+            return;
+        }
+
+        console.log(`[Server] Generating non-custodial position creation plan for account: ${account} on network: ${network}`);
+        const result = await createPosition({
+            account,
+            network,
+            rangeWidth,
+            amount0Desired,
+            amount1Desired,
+        });
+
+        res.json(result);
+    } catch (err: any) {
+        console.error('Error executing position creation:', err);
+        res.status(500).json({
+            error: 'Failed to create Uniswap position plan',
+            details: err?.message || String(err),
+        });
+    }
+};
+
 // Protect routes with x402 payment middleware
 app.get('/check-health', x402PaymentMiddleware, handleCheckHealth);
 app.post('/check-health', x402PaymentMiddleware, handleCheckHealth);
@@ -230,8 +343,23 @@ app.post('/check-health', x402PaymentMiddleware, handleCheckHealth);
 app.get('/rebalance', x402PaymentMiddleware, handleRebalance);
 app.post('/rebalance', x402PaymentMiddleware, handleRebalance);
 
+app.get('/copy-intelligence', x402PaymentMiddleware, handleCopyIntelligence);
+app.post('/copy-intelligence', x402PaymentMiddleware, handleCopyIntelligence);
+app.get('/copy-trade', x402PaymentMiddleware, handleCopyIntelligence);
+app.post('/copy-trade', x402PaymentMiddleware, handleCopyIntelligence);
+app.get('/copy_trade', x402PaymentMiddleware, handleCopyIntelligence);
+app.post('/copy_trade', x402PaymentMiddleware, handleCopyIntelligence);
+
+app.get('/create-position', x402PaymentMiddleware, handleCreatePosition);
+app.post('/create-position', x402PaymentMiddleware, handleCreatePosition);
+app.get('/create-centered', x402PaymentMiddleware, handleCreatePosition);
+app.post('/create-centered', x402PaymentMiddleware, handleCreatePosition);
+app.get('/create_centered', x402PaymentMiddleware, handleCreatePosition);
+app.post('/create_centered', x402PaymentMiddleware, handleCreatePosition);
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
     console.log(`x402 Server Payment Receiver Wallet: ${SERVER_PAYMENT_ADDRESS}`);
 });
+
