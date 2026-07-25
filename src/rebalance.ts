@@ -3,6 +3,7 @@ import { createPublicClient, http, encodeFunctionData, parseEther, formatEther, 
 import { base, baseSepolia } from 'viem/chains';
 import * as Constants from '../constants.ts';
 import { checkUniswapPositionsHealth } from './subgraph.ts';
+import { getUniswapQuote, calculateSlippageBounds } from './uniswap_api.ts';
 
 export interface RebalanceOptions {
     account: string;
@@ -225,6 +226,16 @@ export async function rebalancePosition(options: RebalanceOptions): Promise<Reba
         if (excessWethWei > 0n) {
             console.log(`[Rebalance Service] Preparing Swap ${formatEther(excessWethWei)} WETH -> USDC for 50/50 balance...`);
 
+            const uniQuote = await getUniswapQuote({
+                tokenIn: token0,
+                tokenOut: token1,
+                amountIn: excessWethWei.toString(),
+                recipient: options.account,
+                slippageTolerancePercent: 0.5,
+            });
+
+            const amountOutMin = uniQuote.amountOutMin ? BigInt(uniQuote.amountOutMin) : 0n;
+
             const approveSwapData = encodeFunctionData({
                 abi: Constants.ERC20_ABI,
                 functionName: 'approve',
@@ -238,26 +249,34 @@ export async function rebalancePosition(options: RebalanceOptions): Promise<Reba
                 data: approveSwapData,
             });
 
-            const swapData = encodeFunctionData({
-                abi: Constants.ROUTER_ABI,
-                functionName: 'exactInputSingle',
-                args: [
-                    {
-                        tokenIn: token0,
-                        tokenOut: token1,
-                        fee,
-                        recipient: options.account as `0x${string}`,
-                        amountIn: excessWethWei,
-                        amountOutMinimum: 0n,
-                        sqrtPriceLimitX96: 0n,
-                    },
-                ],
-            });
+            let swapData: `0x${string}`;
+            let swapTo: `0x${string}` = Constants.SWAP_ROUTER;
+
+            if (uniQuote.methodParameters) {
+                swapData = uniQuote.methodParameters.calldata as `0x${string}`;
+                swapTo = uniQuote.methodParameters.to as `0x${string}`;
+            } else {
+                swapData = encodeFunctionData({
+                    abi: Constants.ROUTER_ABI,
+                    functionName: 'exactInputSingle',
+                    args: [
+                        {
+                            tokenIn: token0,
+                            tokenOut: token1,
+                            fee,
+                            recipient: options.account as `0x${string}`,
+                            amountIn: excessWethWei,
+                            amountOutMinimum: amountOutMin,
+                            sqrtPriceLimitX96: 0n,
+                        },
+                    ],
+                });
+            }
 
             preparedTransactions.push({
                 id: 'swap',
-                description: `Swap ${formatEther(excessWethWei)} WETH -> USDC via SwapRouter`,
-                to: Constants.SWAP_ROUTER,
+                description: `Swap ${formatEther(excessWethWei)} WETH -> USDC via ${uniQuote.source === 'UNISWAP_API' ? 'Uniswap Routing API' : 'SwapRouter'}`,
+                to: swapTo,
                 data: swapData,
             });
 
@@ -275,6 +294,16 @@ export async function rebalancePosition(options: RebalanceOptions): Promise<Reba
         if (excessUsdcUnits > 0n) {
             console.log(`[Rebalance Service] Preparing Swap ${excessUsdcUnits.toString()} USDC -> WETH for 50/50 balance...`);
 
+            const uniQuote = await getUniswapQuote({
+                tokenIn: token1,
+                tokenOut: token0,
+                amountIn: excessUsdcUnits.toString(),
+                recipient: options.account,
+                slippageTolerancePercent: 0.5,
+            });
+
+            const amountOutMin = uniQuote.amountOutMin ? BigInt(uniQuote.amountOutMin) : 0n;
+
             const approveSwapData = encodeFunctionData({
                 abi: Constants.ERC20_ABI,
                 functionName: 'approve',
@@ -288,26 +317,34 @@ export async function rebalancePosition(options: RebalanceOptions): Promise<Reba
                 data: approveSwapData,
             });
 
-            const swapData = encodeFunctionData({
-                abi: Constants.ROUTER_ABI,
-                functionName: 'exactInputSingle',
-                args: [
-                    {
-                        tokenIn: token1,
-                        tokenOut: token0,
-                        fee,
-                        recipient: options.account as `0x${string}`,
-                        amountIn: excessUsdcUnits,
-                        amountOutMinimum: 0n,
-                        sqrtPriceLimitX96: 0n,
-                    },
-                ],
-            });
+            let swapData: `0x${string}`;
+            let swapTo: `0x${string}` = Constants.SWAP_ROUTER;
+
+            if (uniQuote.methodParameters) {
+                swapData = uniQuote.methodParameters.calldata as `0x${string}`;
+                swapTo = uniQuote.methodParameters.to as `0x${string}`;
+            } else {
+                swapData = encodeFunctionData({
+                    abi: Constants.ROUTER_ABI,
+                    functionName: 'exactInputSingle',
+                    args: [
+                        {
+                            tokenIn: token1,
+                            tokenOut: token0,
+                            fee,
+                            recipient: options.account as `0x${string}`,
+                            amountIn: excessUsdcUnits,
+                            amountOutMinimum: amountOutMin,
+                            sqrtPriceLimitX96: 0n,
+                        },
+                    ],
+                });
+            }
 
             preparedTransactions.push({
                 id: 'swap',
-                description: `Swap ${excessUsdcUnits.toString()} USDC -> WETH via SwapRouter`,
-                to: Constants.SWAP_ROUTER,
+                description: `Swap ${excessUsdcUnits.toString()} USDC -> WETH via ${uniQuote.source === 'UNISWAP_API' ? 'Uniswap Routing API' : 'SwapRouter'}`,
+                to: swapTo,
                 data: swapData,
             });
 
@@ -363,6 +400,8 @@ export async function rebalancePosition(options: RebalanceOptions): Promise<Reba
         data: approveMintToken1Data,
     });
 
+    const { amount0Min, amount1Min } = calculateSlippageBounds(bal0, bal1, 0.5);
+
     const mintData = encodeFunctionData({
         abi: Constants.NPM_ABI,
         functionName: 'mint',
@@ -375,8 +414,8 @@ export async function rebalancePosition(options: RebalanceOptions): Promise<Reba
                 tickUpper: newTickUpper,
                 amount0Desired: bal0,
                 amount1Desired: bal1,
-                amount0Min: 0n,
-                amount1Min: 0n,
+                amount0Min,
+                amount1Min,
                 recipient: options.account as `0x${string}`,
                 deadline,
             },

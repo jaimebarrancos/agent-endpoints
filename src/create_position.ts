@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { createPublicClient, http, encodeFunctionData, parseEther, formatEther, maxUint256 } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
 import * as Constants from '../constants.ts';
+import { calculateSlippageBounds } from './uniswap_api.ts';
 
 export interface CreatePositionOptions {
     account: string;
@@ -196,6 +197,8 @@ export async function createPosition(options: CreatePositionOptions): Promise<Cr
     });
 
     // Step 4: Mint position
+    const { amount0Min, amount1Min } = calculateSlippageBounds(finalAmount0Desired, finalAmount1Desired, 0.5);
+
     const mintData = encodeFunctionData({
         abi: Constants.NPM_ABI,
         functionName: 'mint',
@@ -208,8 +211,8 @@ export async function createPosition(options: CreatePositionOptions): Promise<Cr
                 tickUpper,
                 amount0Desired: finalAmount0Desired,
                 amount1Desired: finalAmount1Desired,
-                amount0Min: 0n,
-                amount1Min: 0n,
+                amount0Min,
+                amount1Min,
                 recipient: options.account as `0x${string}`,
                 deadline,
             },
