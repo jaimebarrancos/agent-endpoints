@@ -206,7 +206,7 @@ const handleRebalance = async (req: Request, res: Response) => {
             return;
         }
 
-        console.log(`[Server] Executing rebalance for account: ${account} on network: ${network}`);
+        console.log(`[Server] Generating non-custodial rebalance plan for account: ${account} on network: ${network}`);
         const result = await rebalancePosition({
             account,
             tokenId: tokenId ? String(tokenId) : undefined,

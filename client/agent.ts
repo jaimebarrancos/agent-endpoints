@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { wrapFetchWithPaymentFromConfig } from '@x402/fetch';
 import { ExactEvmScheme } from '@x402/evm';
-import { createPublicClient, http, formatEther } from 'viem';
+import { createPublicClient, createWalletClient, http, formatEther } from 'viem';
 import { base } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import * as Constants from '../constants.ts';
@@ -12,8 +12,20 @@ if (!clientPaymentsKey) {
 }
 const walletB = privateKeyToAccount(clientPaymentsKey);
 
+const clientPrivateKey = process.env.CLIENT_PRIVATE_KEY as `0x${string}`;
+if (!clientPrivateKey) {
+    throw new Error('CLIENT_PRIVATE_KEY is missing in process.env');
+}
+const clientAccount = privateKeyToAccount(clientPrivateKey);
+
 const rpcUrl = process.env.RPC_URL || 'http://127.0.0.1:8545';
 const publicClient = createPublicClient({
+    chain: base,
+    transport: http(rpcUrl),
+});
+
+const walletClient = createWalletClient({
+    account: clientAccount,
     chain: base,
     transport: http(rpcUrl),
 });
@@ -38,10 +50,7 @@ const fetchWithPayment = wrapFetchWithPaymentFromConfig(fetch, {
     ],
 });
 
-const targetAccount = (process.env.CLIENT_ADDRESS || process.env.TARGET_ACCOUNT) as string;
-if (!targetAccount) {
-    throw new Error('CLIENT_ADDRESS is missing in process.env');
-}
+const targetAccount = (process.env.CLIENT_ADDRESS || process.env.TARGET_ACCOUNT || clientAccount.address) as string;
 
 async function runAutonomousAgent() {
     console.log(`=============================================================`);
@@ -94,6 +103,22 @@ async function runAutonomousAgent() {
             const rebalanceData = await rebalanceResponse.json();
             console.log('[Agent] Rebalance Response:');
             console.log(JSON.stringify(rebalanceData, null, 2));
+
+            if (Array.isArray(rebalanceData?.preparedTransactions) && rebalanceData.preparedTransactions.length > 0) {
+                console.log(`\n[Agent] Executing ${rebalanceData.preparedTransactions.length} prepared rebalance transactions non-custodially...`);
+                for (let i = 0; i < rebalanceData.preparedTransactions.length; i++) {
+                    const tx = rebalanceData.preparedTransactions[i];
+                    console.log(`[Agent] Step ${i + 1}/${rebalanceData.preparedTransactions.length}: ${tx.description}`);
+                    const hash = await walletClient.sendTransaction({
+                        to: tx.to,
+                        data: tx.data,
+                        value: tx.value ? BigInt(tx.value) : 0n,
+                    });
+                    console.log(`  Tx Sent: ${hash}. Waiting for confirmation...`);
+                    await publicClient.waitForTransactionReceipt({ hash });
+                }
+                console.log('[Agent] All rebalance transactions executed successfully!');
+            }
         } catch (err: any) {
             console.error('[Agent] Error during /rebalance call:', err?.message || err);
         }
