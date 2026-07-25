@@ -10,7 +10,7 @@ export const USDC_ADDRESS_MAINNET = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 export const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
 export const USDC_WETH_POOL_500_MAINNET = '0xd0b53D9277642d899DF5C87A3966A349A798F224';
 
-export const SUBGRAPH_URL_MAINNET = 'http://localhost:8000/subgraphs/name/uniswap-v3-base'; //`https://gateway.thegraph.com/api/${process.env.SUBGRAPH_API_KEY || ''}/subgraphs/id/43Hwfi3dJSoGpyas9VwNoDAv55yjgGrPpNSmbQZArzMG`;
+export const SUBGRAPH_URL_MAINNET = `https://gateway.thegraph.com/api/${process.env.SUBGRAPH_API_KEY || ''}/subgraphs/id/43Hwfi3dJSoGpyas9VwNoDAv55yjgGrPpNSmbQZArzMG`; //'http://localhost:8000/subgraphs/name/uniswap-v3-base';
 
 // ===========================================================================
 // BASE TESTNET (BASE SEPOLIA)
@@ -21,7 +21,7 @@ export const WETH_ADDRESS_TESTNET = '0x4200000000000000000000000000000000000006'
 export const USDC_ADDRESS_TESTNET = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
 export const USDC_WETH_POOL_500_TESTNET = '0xb3404E269FA916f1947bE0dAE6dff430eAbe8361';
 
-export const SUBGRAPH_URL_TESTNET = 'http://localhost:8000/subgraphs/name/uniswap-v3-base'; //'https://api.studio.thegraph.com/query/48043/uniswap-v3-base-sepolia/version/latest';
+export const SUBGRAPH_URL_TESTNET = 'https://api.studio.thegraph.com/query/48043/uniswap-v3-base-sepolia/version/latest';  //'http://localhost:8000/subgraphs/name/uniswap-v3-base'; 
 
 // ===========================================================================
 // ACTIVE SELECTION (DEFAULT)

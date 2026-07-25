@@ -90,12 +90,8 @@ query GetPositions($owner: String!) {
     id
     owner
     liquidity
-    tickLower {
-      tickIdx
-    }
-    tickUpper {
-      tickIdx
-    }
+    tickLower
+    tickUpper
     pool {
       id
       tick
@@ -269,12 +265,8 @@ query GetTopPositions($first: Int!) {
     id
     owner
     liquidity
-    tickLower {
-      tickIdx
-    }
-    tickUpper {
-      tickIdx
-    }
+    tickLower
+    tickUpper
     pool {
       id
       tick
