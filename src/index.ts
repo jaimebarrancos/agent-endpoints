@@ -8,6 +8,7 @@ import * as Constants from '../constants.ts';
 import { checkUniswapPositionsHealth, getCopyTradingIntelligence } from './subgraph.ts';
 import { rebalancePosition } from './rebalance.ts';
 import { createPosition } from './create_position.ts';
+import { withdrawPosition } from './withdraw_position.ts';
 
 const app: Express = express();
 app.use(express.json());
@@ -173,22 +174,22 @@ const handleCheckHealth = async (req: Request, res: Response) => {
             req.query.tickBuffer !== undefined
                 ? Number(req.query.tickBuffer)
                 : req.body?.tickBuffer !== undefined
-                ? Number(req.body.tickBuffer)
-                : undefined;
+                    ? Number(req.body.tickBuffer)
+                    : undefined;
 
         const timeBuffer =
             req.query.timeBuffer !== undefined
                 ? Number(req.query.timeBuffer)
                 : req.body?.timeBuffer !== undefined
-                ? Number(req.body.timeBuffer)
-                : undefined;
+                    ? Number(req.body.timeBuffer)
+                    : undefined;
 
         const lastOutOfRangeTimestamp =
             req.query.lastOutOfRangeTimestamp !== undefined
                 ? Number(req.query.lastOutOfRangeTimestamp)
                 : req.body?.lastOutOfRangeTimestamp !== undefined
-                ? Number(req.body.lastOutOfRangeTimestamp)
-                : undefined;
+                    ? Number(req.body.lastOutOfRangeTimestamp)
+                    : undefined;
 
         if (!account) {
             res.status(400).json({
@@ -304,8 +305,8 @@ const handleCreatePosition = async (req: Request, res: Response) => {
             req.query.rangeWidth !== undefined
                 ? Number(req.query.rangeWidth)
                 : req.body?.rangeWidth !== undefined
-                ? Number(req.body.rangeWidth)
-                : undefined;
+                    ? Number(req.body.rangeWidth)
+                    : undefined;
 
         const amount0Desired = (req.query.amount0Desired || req.body?.amount0Desired) as string | undefined;
         const amount1Desired = (req.query.amount1Desired || req.body?.amount1Desired) as string | undefined;
@@ -336,6 +337,44 @@ const handleCreatePosition = async (req: Request, res: Response) => {
     }
 };
 
+const handleWithdrawPosition = async (req: Request, res: Response) => {
+    try {
+        const account = (
+            req.query.account ||
+            req.body?.account ||
+            req.query.wallet ||
+            req.body?.wallet
+        ) as string | undefined;
+
+        const tokenId = req.query.tokenId || req.body?.tokenId;
+        const percentage = req.query.percentage || req.body?.percentage;
+        const network = ((req.query.network || req.body?.network) as string) || 'base-mainnet';
+
+        if (!account) {
+            res.status(400).json({
+                error: 'Missing required parameter "account". Provide ?account=0x... or JSON body {"account": "0x..."}',
+            });
+            return;
+        }
+
+        console.log(`[Server] Generating non-custodial position withdrawal plan for account: ${account} on network: ${network}`);
+        const result = await withdrawPosition({
+            account,
+            tokenId: tokenId ? String(tokenId) : undefined,
+            percentage: percentage !== undefined ? Number(percentage) : undefined,
+            network,
+        });
+
+        res.json(result);
+    } catch (err: any) {
+        console.error('Error executing position withdrawal:', err);
+        res.status(500).json({
+            error: 'Failed to create Uniswap position withdrawal plan',
+            details: err?.message || String(err),
+        });
+    }
+};
+
 // Protect routes with x402 payment middleware
 app.get('/check-health', x402PaymentMiddleware, handleCheckHealth);
 app.post('/check-health', x402PaymentMiddleware, handleCheckHealth);
@@ -357,9 +396,13 @@ app.post('/create-centered', x402PaymentMiddleware, handleCreatePosition);
 app.get('/create_centered', x402PaymentMiddleware, handleCreatePosition);
 app.post('/create_centered', x402PaymentMiddleware, handleCreatePosition);
 
+app.get('/withdraw', x402PaymentMiddleware, handleWithdrawPosition);
+app.post('/withdraw', x402PaymentMiddleware, handleWithdrawPosition);
+app.get('/withdraw-position', x402PaymentMiddleware, handleWithdrawPosition);
+app.post('/withdraw-position', x402PaymentMiddleware, handleWithdrawPosition);
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
     console.log(`x402 Server Payment Receiver Wallet: ${SERVER_PAYMENT_ADDRESS}`);
 });
-

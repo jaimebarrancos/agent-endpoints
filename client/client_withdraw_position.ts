@@ -51,11 +51,15 @@ const fetchWithPayment = wrapFetchWithPaymentFromConfig(fetch, {
 });
 
 const targetAccount = (process.env.CLIENT_ADDRESS || process.env.TARGET_ACCOUNT || clientAccount.address) as string;
+const tokenId = process.env.TOKEN_ID;
+const percentage = process.env.WITHDRAW_PERCENTAGE ? Number(process.env.WITHDRAW_PERCENTAGE) : 100;
 
-async function runRebalanceClient() {
+export async function runWithdrawPositionClient() {
     console.log(`=============================================================`);
-    console.log(` Executing /rebalance Client (Payer: ${walletB.address})`);
+    console.log(` Executing /withdraw Client (Payer: ${walletB.address})`);
     console.log(` Target Client Wallet: ${clientAccount.address}`);
+    if (tokenId) console.log(` Target Token ID: #${tokenId}`);
+    console.log(` Withdrawal Percentage: ${percentage}%`);
     console.log(`=============================================================`);
 
     const initialBalances = await fetchClientBalances(walletB.address);
@@ -63,31 +67,33 @@ async function runRebalanceClient() {
     console.log(`  ETH:  ${formatEther(initialBalances.ethBal)} ETH`);
     console.log(`  USDC: $${(Number(initialBalances.usdcBal) / 1e6).toFixed(6)} USDC`);
 
-    console.log('\n[Client] Requesting non-custodial rebalance plan from /rebalance with x402 payment...');
+    console.log('\n[Client] Requesting position withdrawal plan from /withdraw with x402 payment...');
     try {
-        const response = await fetchWithPayment('http://localhost:3000/rebalance', {
+        const response = await fetchWithPayment('http://localhost:3000/withdraw', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 account: targetAccount,
+                tokenId: tokenId || undefined,
+                percentage,
                 network: 'base-mainnet',
             }),
         });
 
         const data = await response.json();
-        console.log('\n[Client] Received Non-Custodial Rebalance Plan:');
+        console.log('\n[Client] Received Withdrawal Plan Result:');
         console.log(JSON.stringify(data, null, 2));
 
         if (Array.isArray(data?.preparedTransactions) && data.preparedTransactions.length > 0) {
             console.log(`\n=============================================================`);
-            console.log(` [Client] Executing ${data.preparedTransactions.length} Non-Custodial Transactions`);
+            console.log(` [Client] Executing ${data.preparedTransactions.length} Non-Custodial Withdrawal Transactions`);
             console.log(`=============================================================`);
 
             for (let i = 0; i < data.preparedTransactions.length; i++) {
                 const tx = data.preparedTransactions[i];
                 console.log(`\n[Client] Step ${i + 1}/${data.preparedTransactions.length}: ${tx.description} (${tx.id})`);
                 console.log(`  Target: ${tx.to}`);
-                
+
                 const hash = await walletClient.sendTransaction({
                     to: tx.to,
                     data: tx.data,
@@ -101,11 +107,11 @@ async function runRebalanceClient() {
             }
 
             console.log(`\n=============================================================`);
-            console.log(` [Client] All Rebalance Transactions Successfully Executed!`);
+            console.log(` [Client] All Position Withdrawal Transactions Successfully Executed!`);
             console.log(`=============================================================`);
         }
     } catch (err: any) {
-        console.error('[Client] Error during /rebalance call:', err?.message || err);
+        console.error('[Client] Error during /withdraw call:', err?.message || err);
     }
 
     // Short delay to allow RPC node to index the newly mined settlement block
@@ -122,4 +128,4 @@ async function runRebalanceClient() {
     console.log(`=============================================================\n`);
 }
 
-runRebalanceClient();
+runWithdrawPositionClient();

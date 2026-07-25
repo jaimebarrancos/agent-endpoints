@@ -116,6 +116,9 @@ async function runCopyTradeClient() {
         console.error('[Client] Error during /copy-intelligence call:', err?.message || err);
     }
 
+    // Short delay to allow RPC node to index the newly mined settlement block
+    await new Promise((r) => setTimeout(r, 2500));
+
     const finalBalances = await fetchClientBalances(walletB.address);
     const usdcDiff = Number(initialBalances.usdcBal) - Number(finalBalances.usdcBal);
 

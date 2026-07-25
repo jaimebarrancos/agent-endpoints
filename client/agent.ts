@@ -128,6 +128,9 @@ async function runAutonomousAgent() {
         console.log('\n[Agent] Position is healthy! No rebalance required at this time.');
     }
 
+    // Short delay to allow RPC node to index the newly mined settlement block
+    await new Promise((r) => setTimeout(r, 2500));
+
     const finalBalances = await fetchClientBalances(walletB.address);
     const usdcDiff = Number(initialBalances.usdcBal) - Number(finalBalances.usdcBal);
 
