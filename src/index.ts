@@ -1,6 +1,9 @@
+import 'dotenv/config';
 import express, { type Express, type Request, type Response, type NextFunction } from 'express';
-import { createPublicClient, http, formatEther } from 'viem';
+import { createPublicClient, createWalletClient, http, formatEther, parseAbi, recoverTypedDataAddress, keccak256, encodeAbiParameters, stringToHex } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
+import { decodePaymentSignatureHeader } from '@x402/core/http';
 import * as Constants from '../constants.ts';
 import { checkUniswapPositionsHealth } from './fetcher.ts';
 import { rebalancePosition } from './rebalance.ts';
@@ -8,14 +11,28 @@ import { rebalancePosition } from './rebalance.ts';
 const app: Express = express();
 app.use(express.json());
 
-// Server Payment Receiver Wallet (3rd Foundry Account)
-export const SERVER_PAYMENT_ADDRESS = '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC' as `0x${string}`;
+// Server Payment Receiver Wallet
+export const SERVER_PAYMENT_ADDRESS = process.env.SERVER_PAYMENTS_ADDRESS as `0x${string}`;
+const serverPrivateKey = process.env.SERVER_PAYMENTS_PRIVATE_KEY as `0x${string}`;
+
+if (!SERVER_PAYMENT_ADDRESS || !serverPrivateKey) {
+    throw new Error('SERVER_PAYMENTS_ADDRESS or SERVER_PAYMENTS_PRIVATE_KEY is missing in process.env');
+}
 
 const rpcUrl = process.env.RPC_URL || 'http://127.0.0.1:8545';
 const publicClient = createPublicClient({
     chain: base,
     transport: http(rpcUrl),
 });
+
+const serverAccount = privateKeyToAccount(serverPrivateKey);
+const serverWalletClient = createWalletClient({
+    account: serverAccount,
+    chain: base,
+    transport: http(rpcUrl),
+});
+
+
 
 /**
  * Helper to fetch and print the server payment wallet balance
@@ -31,10 +48,10 @@ async function printServerPaymentWalletBalance(route: string) {
         });
 
         console.log(`\n=============================================================`);
-        console.log(` [x402 Server] Payment Received for ${route}`);
+        console.log(` [x402 Server] Payment Header Verified for ${route}`);
         console.log(` Receiver Wallet: ${SERVER_PAYMENT_ADDRESS}`);
         console.log(` Current ETH Balance:  ${formatEther(ethBal)} ETH`);
-        console.log(` Current USDC Balance: $${(Number(usdcBal) / 1e6).toFixed(2)} USDC (${usdcBal.toString()} units)`);
+        console.log(` Current USDC Balance: $${(Number(usdcBal) / 1e6).toFixed(6)} USDC (${usdcBal.toString()} units)`);
         console.log(`=============================================================\n`);
     } catch (err: any) {
         console.warn('[x402 Server] Failed to query server payment wallet balance:', err?.message || err);
@@ -55,7 +72,7 @@ const x402PaymentMiddleware = async (req: Request, res: Response, next: NextFunc
 
     if (!paymentHeader) {
         console.log(`[x402 Server] Request to ${req.path} lacks payment signature. Returning HTTP 402 Payment Required...`);
-
+        console.log("USDC: " + Constants.USDC_ADDRESS_MAINNET);
         const paymentRequirements = {
             x402Version: 2,
             resource: {
@@ -69,8 +86,11 @@ const x402PaymentMiddleware = async (req: Request, res: Response, next: NextFunc
                     asset: Constants.USDC_ADDRESS_MAINNET,
                     amount: '10000', // 0.01 USDC (6 decimals)
                     payTo: SERVER_PAYMENT_ADDRESS,
-                    maxTimeoutSeconds: 60,
-                    extra: {},
+                    maxTimeoutSeconds: 3600,
+                    extra: {
+                        name: 'USD Coin',
+                        version: '2',
+                    },
                 },
             ],
         };
@@ -81,8 +101,47 @@ const x402PaymentMiddleware = async (req: Request, res: Response, next: NextFunc
         return;
     }
 
-    // Payment signature present
-    console.log(`[x402 Server] Valid payment header detected for ${req.path}`);
+    try {
+        const paymentPayload = decodePaymentSignatureHeader(paymentHeader);
+        const authorization = (paymentPayload?.payload as any)?.authorization;
+        const signature = (paymentPayload?.payload as any)?.signature;
+
+        if (authorization && signature) {
+            console.log(`[x402 Server] Settling EIP-3009 authorization on-chain for ${authorization.from}...`);
+            const EIP3009_ABI = parseAbi([
+                'function transferWithAuthorization(address from, address to, uint256 value, uint256 validAfter, uint256 validBefore, bytes32 nonce, bytes signature) external',
+            ]);
+
+            const txHash = await serverWalletClient.writeContract({
+                address: Constants.USDC_ADDRESS_MAINNET,
+                abi: EIP3009_ABI,
+                functionName: 'transferWithAuthorization',
+                args: [
+                    authorization.from,
+                    authorization.to,
+                    BigInt(authorization.value),
+                    BigInt(authorization.validAfter),
+                    BigInt(authorization.validBefore),
+                    authorization.nonce,
+                    signature,
+                ],
+            });
+
+            await publicClient.waitForTransactionReceipt({ hash: txHash });
+            console.log(`[x402 Server] On-chain EIP-3009 payment settlement confirmed! Tx: ${txHash}`);
+        } else {
+            res.status(402).json({ error: 'Invalid payment signature header payload' });
+            return;
+        }
+    } catch (err: any) {
+        console.error('[x402 Server] Settlement error:', err?.message || err);
+        res.status(402).json({
+            error: 'Payment settlement failed',
+            details: err?.shortMessage || err?.message || String(err),
+        });
+        return;
+    }
+
     await printServerPaymentWalletBalance(req.path);
 
     // Set settlement response header

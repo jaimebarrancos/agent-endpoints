@@ -1,0 +1,86 @@
+import 'dotenv/config';
+import { wrapFetchWithPaymentFromConfig } from '@x402/fetch';
+import { ExactEvmScheme } from '@x402/evm';
+import { createPublicClient, http, formatEther } from 'viem';
+import { base } from 'viem/chains';
+import { privateKeyToAccount } from 'viem/accounts';
+import * as Constants from '../constants.ts';
+
+const clientPaymentsKey = process.env.CLIENT_PAYMENTS_PRIVATE_KEY as `0x${string}`;
+if (!clientPaymentsKey) {
+    throw new Error('CLIENT_PAYMENTS_PRIVATE_KEY is missing in process.env');
+}
+const walletB = privateKeyToAccount(clientPaymentsKey);
+
+const rpcUrl = process.env.RPC_URL || 'http://127.0.0.1:8545';
+const publicClient = createPublicClient({
+    chain: base,
+    transport: http(rpcUrl),
+});
+
+async function fetchClientBalances(address: `0x${string}`) {
+    const ethBal = await publicClient.getBalance({ address });
+    const usdcBal = await publicClient.readContract({
+        address: Constants.USDC_ADDRESS_MAINNET,
+        abi: Constants.ERC20_ABI,
+        functionName: 'balanceOf',
+        args: [address],
+    });
+    return { ethBal, usdcBal };
+}
+
+const fetchWithPayment = wrapFetchWithPaymentFromConfig(fetch, {
+    schemes: [
+        {
+            network: 'eip155:8453',
+            client: new ExactEvmScheme(walletB),
+        },
+    ],
+});
+
+const targetAccount = (process.env.CLIENT_ADDRESS || process.env.TARGET_ACCOUNT) as string;
+if (!targetAccount) {
+    throw new Error('CLIENT_ADDRESS is missing in process.env');
+}
+
+async function runCheckHealthClient() {
+    console.log(`=============================================================`);
+    console.log(` Executing /check-health Client (Payer: ${walletB.address})`);
+    console.log(` Target Account: ${targetAccount}`);
+    console.log(`=============================================================`);
+
+    const initialBalances = await fetchClientBalances(walletB.address);
+    console.log(`\n[Client] Initial Wallet Balances:`);
+    console.log(`  ETH:  ${formatEther(initialBalances.ethBal)} ETH`);
+    console.log(`  USDC: $${(Number(initialBalances.usdcBal) / 1e6).toFixed(6)} USDC`);
+
+    console.log('\n[Client] Requesting /check-health with x402 payment...');
+    try {
+        const response = await fetchWithPayment('http://localhost:3000/check-health', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                account: targetAccount,
+                network: 'base-mainnet',
+            }),
+        });
+
+        const data = await response.json();
+        console.log('\n[Client] Received Check Health Result:');
+        console.log(JSON.stringify(data, null, 2));
+    } catch (err: any) {
+        console.error('[Client] Error during /check-health call:', err?.message || err);
+    }
+
+    const finalBalances = await fetchClientBalances(walletB.address);
+    const usdcDiff = Number(initialBalances.usdcBal) - Number(finalBalances.usdcBal);
+
+    console.log(`\n=============================================================`);
+    console.log(` [Client] Final Balances:`);
+    console.log(`  ETH:       ${formatEther(finalBalances.ethBal)} ETH`);
+    console.log(`  USDC:      $${(Number(finalBalances.usdcBal) / 1e6).toFixed(6)} USDC`);
+    console.log(`  x402 Spent: $${(usdcDiff / 1e6).toFixed(6)} USDC (${usdcDiff.toString()} units)`);
+    console.log(`=============================================================\n`);
+}
+
+runCheckHealthClient();

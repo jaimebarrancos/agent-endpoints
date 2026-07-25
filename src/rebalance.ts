@@ -41,9 +41,9 @@ export interface RebalanceResult {
 }
 
 export async function rebalancePosition(options: RebalanceOptions): Promise<RebalanceResult> {
-    const privateKey = process.env.PRIVATE_KEY as `0x${string}`;
+    const privateKey = (process.env.CLIENT_PRIVATE_KEY || process.env.PRIVATE_KEY) as `0x${string}`;
     if (!privateKey) {
-        throw new Error('PRIVATE_KEY environment variable is missing in process.env');
+        throw new Error('CLIENT_PRIVATE_KEY environment variable is missing in process.env');
     }
 
     const walletAccount = privateKeyToAccount(privateKey);
@@ -74,7 +74,7 @@ export async function rebalancePosition(options: RebalanceOptions): Promise<Reba
         try {
             const health = await checkUniswapPositionsHealth(options.account, { network: options.network });
             const activePositions = health.positions.filter((p) => BigInt(p.liquidity) > 0n);
-            const targetPos = activePositions.find((p) => p.status === 'OUT_OF_RANGE') || activePositions[0];
+            const targetPos = activePositions.find((p) => p.status === 'OUT_OF_RANGE') || activePositions[0] || health.positions[0];
             if (targetPos && targetPos.id) {
                 targetTokenId = BigInt(targetPos.id);
             }

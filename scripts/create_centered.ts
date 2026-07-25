@@ -9,7 +9,11 @@ import 'dotenv/config';
 // STEP 1: FUND WALLET WITH WETH & USDC
 // ===========================================================================
 async function createCenteredPositionOnAnvil() {
-    const account = privateKeyToAccount(process.env.PRIVATE_KEY as `0x${string}`);
+    const key = (process.env.CLIENT_PRIVATE_KEY || process.env.PRIVATE_KEY) as `0x${string}`;
+    if (!key) {
+        throw new Error('CLIENT_PRIVATE_KEY is missing in process.env');
+    }
+    const account = privateKeyToAccount(key);
 
     const publicClient = createPublicClient({
         chain: base,

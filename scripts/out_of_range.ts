@@ -5,9 +5,9 @@ import { base, baseSepolia } from 'viem/chains';
 import 'dotenv/config';
 
 async function makePositionOutOfRange() {
-    const privateKey = process.env.PRIVATE_KEY as `0x${string}`;
+    const privateKey = (process.env.CLIENT_PRIVATE_KEY || process.env.PRIVATE_KEY) as `0x${string}`;
     if (!privateKey) {
-        throw new Error('PRIVATE_KEY environment variable is missing.');
+        throw new Error('CLIENT_PRIVATE_KEY environment variable is missing.');
     }
 
     const account = privateKeyToAccount(privateKey);

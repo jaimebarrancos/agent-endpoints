@@ -1,5 +1,5 @@
 {
-  "name": "agent-engine",
+  "name": "agent-endpoints",
   "version": "1.0.0",
   "description": "",
   "license": "ISC",
@@ -7,12 +7,14 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "create_centered": "tsx scripts/create_centered.ts",
     "out_of_range": "tsx scripts/out_of_range.ts",
     "service": "tsx src/index.ts",
-    "fund_client": "tsx agent/fund_client.ts",
-    "agent_client": "tsx agent/agent_client.ts"
+    "fund_client": "tsx scripts/fund_client.ts",
+    "agent": "tsx client/agent.ts",
+    "client_check_health": "tsx client/client_check_health.ts",
+    "client_rebalance": "tsx client/client_rebalance.ts",
+    "test_settlement": "tsx scripts/test_x402_settlement.ts"
   },
   "dependencies": {
     "@x402/evm": "^2.19.0",
