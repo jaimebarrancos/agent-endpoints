@@ -3,7 +3,7 @@ import { createPublicClient, createWalletClient, http, parseEther, formatEther, 
 import { privateKeyToAccount } from 'viem/accounts';
 import { base, baseSepolia } from 'viem/chains';
 import * as Constants from '../constants.ts';
-import { checkUniswapPositionsHealth } from './fetcher.ts';
+import { checkUniswapPositionsHealth } from './subgraph.ts';
 
 export interface RebalanceOptions {
     account: string;

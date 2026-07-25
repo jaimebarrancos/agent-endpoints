@@ -5,7 +5,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
 import { decodePaymentSignatureHeader } from '@x402/core/http';
 import * as Constants from '../constants.ts';
-import { checkUniswapPositionsHealth } from './fetcher.ts';
+import { checkUniswapPositionsHealth } from './subgraph.ts';
 import { rebalancePosition } from './rebalance.ts';
 
 const app: Express = express();
