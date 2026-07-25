@@ -9,6 +9,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "create_centered": "tsx scripts/create_centered.ts",
+    "out_of_range": "tsx scripts/out_of_range.ts",
     "service": "tsx src/index.ts"
   },
   "dependencies": {
