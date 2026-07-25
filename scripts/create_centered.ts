@@ -95,7 +95,7 @@ async function createCenteredPositionOnAnvil() {
     const currentTickAligned = Math.floor(currentTick / Number(tickSpacing)) * Number(tickSpacing);
 
     // Set a range width of ±200 ticks (~2% wide range)
-    const rangeWidth = 200;
+    const rangeWidth = 100;
     const tickLower = currentTickAligned - rangeWidth;
     const tickUpper = currentTickAligned + rangeWidth;
 
