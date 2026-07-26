@@ -71,6 +71,7 @@ async function runRebalanceClient() {
             body: JSON.stringify({
                 account: targetAccount,
                 network: 'base-mainnet',
+                rangeWidth: 10,
             }),
         });
 
@@ -83,15 +84,21 @@ async function runRebalanceClient() {
             console.log(` [Client] Executing ${data.preparedTransactions.length} Non-Custodial Transactions`);
             console.log(`=============================================================`);
 
+            let currentNonce = await publicClient.getTransactionCount({
+                address: clientAccount.address,
+                blockTag: 'pending',
+            });
+
             for (let i = 0; i < data.preparedTransactions.length; i++) {
                 const tx = data.preparedTransactions[i];
                 console.log(`\n[Client] Step ${i + 1}/${data.preparedTransactions.length}: ${tx.description} (${tx.id})`);
                 console.log(`  Target: ${tx.to}`);
-                
+
                 const hash = await walletClient.sendTransaction({
                     to: tx.to,
                     data: tx.data,
                     value: tx.value ? BigInt(tx.value) : 0n,
+                    nonce: currentNonce++,
                 });
 
                 console.log(`  Tx Sent: ${hash}`);

@@ -62,8 +62,8 @@ async function runCheckHealthClient() {
             body: JSON.stringify({
                 account: targetAccount,
                 network: 'base-mainnet',
-                tickBuffer: 10,  // Allow 10-tick price boundary margin
-                timeBuffer: 300, // Require 300s (5m) duration out of range before declaring unhealthy
+                tickBuffer: 10,
+                timeBuffer: 0,
             }),
         });
 

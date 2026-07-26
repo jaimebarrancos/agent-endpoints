@@ -91,6 +91,11 @@ async function runCopyTradeClient() {
             console.log(` [Client] Executing ${data.preparedTransactions.length} Copy Trade Non-Custodial Transactions`);
             console.log(`=============================================================`);
 
+            let currentNonce = await publicClient.getTransactionCount({
+                address: clientAccount.address,
+                blockTag: 'pending',
+            });
+
             for (let i = 0; i < data.preparedTransactions.length; i++) {
                 const tx = data.preparedTransactions[i];
                 console.log(`\n[Client] Step ${i + 1}/${data.preparedTransactions.length}: ${tx.description} (${tx.id})`);
@@ -100,6 +105,7 @@ async function runCopyTradeClient() {
                     to: tx.to,
                     data: tx.data,
                     value: tx.value ? BigInt(tx.value) : 0n,
+                    nonce: currentNonce++,
                 });
 
                 console.log(`  Tx Sent: ${hash}`);

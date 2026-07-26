@@ -78,10 +78,24 @@ function resolveSubgraphUrl(options?: HealthCheckOptions): { url: string; networ
 function parseTickValue(val: any): number {
     if (val === null || val === undefined) return 0;
     if (typeof val === 'object') {
-        if (val.tickIdx !== undefined) return Number(val.tickIdx);
-        if (val.id !== undefined) return Number(val.id);
+        if (val.tickIdx !== undefined && val.tickIdx !== null) return Number(val.tickIdx);
+        if (val.id !== undefined && val.id !== null) {
+            const parts = String(val.id).split('#');
+            const last = parts[parts.length - 1];
+            if (last && !isNaN(Number(last))) return Number(last);
+        }
     }
-    return Number(val);
+    if (typeof val === 'string') {
+        if (val.includes('#')) {
+            const parts = val.split('#');
+            const last = parts[parts.length - 1];
+            if (last && !isNaN(Number(last))) return Number(last);
+        }
+        const num = Number(val);
+        if (!isNaN(num)) return num;
+    }
+    if (typeof val === 'number') return val;
+    return 0;
 }
 
 const POSITIONS_QUERY = `
@@ -90,8 +104,12 @@ query GetPositions($owner: String!) {
     id
     owner
     liquidity
-    tickLower
-    tickUpper
+    tickLower {
+      tickIdx
+    }
+    tickUpper {
+      tickIdx
+    }
     pool {
       id
       tick
@@ -265,8 +283,12 @@ query GetTopPositions($first: Int!) {
     id
     owner
     liquidity
-    tickLower
-    tickUpper
+    tickLower {
+      tickIdx
+    }
+    tickUpper {
+      tickIdx
+    }
     pool {
       id
       tick

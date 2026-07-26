@@ -4,7 +4,7 @@ import { parseAbi } from 'viem';
 // BASE MAINNET (anvil and mainnet)
 // ===========================================================================
 export const POSITION_MANAGER_MAINNET = '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1';
-export const SWAP_ROUTER_MAINNET = '0x2626664c2603336E57B271c5C0b26F421741e481';
+export const SWAP_ROUTER_MAINNET = '0xE592427A0AEce92De3Edee1F18E0157C05861564';
 export const WETH_ADDRESS_MAINNET = '0x4200000000000000000000000000000000000006';
 export const USDC_ADDRESS_MAINNET = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 export const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
@@ -50,7 +50,7 @@ export const ERC20_ABI = parseAbi([
 ]);
 
 export const ROUTER_ABI = parseAbi([
-    'function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountOut)',
+    'function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountOut)',
 ]);
 
 export const POOL_ABI = parseAbi([
@@ -64,6 +64,7 @@ export const NPM_ABI = parseAbi([
     'function decreaseLiquidity((uint256 tokenId, uint128 liquidity, uint256 amount0Min, uint256 amount1Min, uint256 deadline)) external payable returns (uint256 amount0, uint256 amount1)',
     'function collect((uint256 tokenId, address recipient, uint128 amount0Max, uint128 amount1Max)) external payable returns (uint256 amount0, uint256 amount1)',
     'function burn(uint256 tokenId) external payable',
+    'function multicall(bytes[] data) external payable returns (bytes[] memory results)',
     'function balanceOf(address owner) external view returns (uint256)',
     'function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256)',
     'event IncreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)',

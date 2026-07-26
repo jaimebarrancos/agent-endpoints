@@ -3,7 +3,7 @@ import { createPublicClient, http, encodeFunctionData, parseEther, formatEther, 
 import { base, baseSepolia } from 'viem/chains';
 import * as Constants from '../constants.ts';
 import { checkUniswapPositionsHealth } from './subgraph.ts';
-import { getUniswapQuote, calculateSlippageBounds } from './uniswap_api.ts';
+import { getUniswapQuote, calculateSlippageBounds, calculateOptimalMintAmounts } from './uniswap_api.ts';
 
 export interface RebalanceOptions {
     account: string;
@@ -125,7 +125,7 @@ export async function rebalancePosition(options: RebalanceOptions): Promise<Reba
         args: [targetTokenId],
     });
 
-    const [, , token0, token1, fee, tickLower, tickUpper, liquidity] = posData;
+    const [, , token0, token1, fee, tickLower, tickUpper, liquidity, , , tokensOwed0, tokensOwed1] = posData;
 
     if (liquidity === 0n) {
         throw new Error(`Position NFT #${targetTokenId} has zero liquidity.`);
@@ -153,13 +153,6 @@ export async function rebalancePosition(options: RebalanceOptions): Promise<Reba
         ],
     });
 
-    preparedTransactions.push({
-        id: 'decrease_liquidity',
-        description: `Decrease 100% liquidity from position #${targetTokenId}`,
-        to: Constants.POSITION_MANAGER,
-        data: decreaseLiquidityData,
-    });
-
     const maxUint128 = 340282366920938463463374607431768211455n;
 
     const collectData = encodeFunctionData({
@@ -175,11 +168,23 @@ export async function rebalancePosition(options: RebalanceOptions): Promise<Reba
         ],
     });
 
+    const burnData = encodeFunctionData({
+        abi: Constants.NPM_ABI,
+        functionName: 'burn',
+        args: [targetTokenId],
+    });
+
+    const multicallData = encodeFunctionData({
+        abi: Constants.NPM_ABI,
+        functionName: 'multicall',
+        args: [[decreaseLiquidityData, collectData, burnData]],
+    });
+
     preparedTransactions.push({
-        id: 'collect',
-        description: `Collect tokens from position #${targetTokenId} to ${options.account}`,
+        id: 'withdraw_collect_burn',
+        description: `Atomic Withdraw 100% liquidity, Collect tokens & Burn position #${targetTokenId}`,
         to: Constants.POSITION_MANAGER,
-        data: collectData,
+        data: multicallData,
     });
 
     // =========================================================================
@@ -206,6 +211,28 @@ export async function rebalancePosition(options: RebalanceOptions): Promise<Reba
         functionName: 'balanceOf',
         args: [options.account as `0x${string}`],
     });
+
+    // Factor in the tokens that WILL be collected from Step 1 withdrawal
+    const q96 = 2n ** 96n;
+    const sqrtRatioAX96 = BigInt(Math.floor(Math.pow(1.0001, tickLower / 2) * Number(q96)));
+    const sqrtRatioBX96 = BigInt(Math.floor(Math.pow(1.0001, tickUpper / 2) * Number(q96)));
+
+    let expectedCollected0 = tokensOwed0 || 0n;
+    let expectedCollected1 = tokensOwed1 || 0n;
+
+    if (liquidity > 0n) {
+        if (sqrtPriceX96 <= sqrtRatioAX96) {
+            expectedCollected0 += (liquidity * q96 * (sqrtRatioBX96 - sqrtRatioAX96)) / (sqrtRatioAX96 * sqrtRatioBX96);
+        } else if (sqrtPriceX96 >= sqrtRatioBX96) {
+            expectedCollected1 += (liquidity * (sqrtRatioBX96 - sqrtRatioAX96)) / q96;
+        } else {
+            expectedCollected0 += (liquidity * q96 * (sqrtRatioBX96 - sqrtPriceX96)) / (sqrtPriceX96 * sqrtRatioBX96);
+            expectedCollected1 += (liquidity * (sqrtPriceX96 - sqrtRatioAX96)) / q96;
+        }
+    }
+
+    bal0 += expectedCollected0;
+    bal1 += expectedCollected1;
 
     const sqrtPriceNum = Number(sqrtPriceX96) / 2 ** 96;
     const priceToken0InToken1 = sqrtPriceNum * sqrtPriceNum * 1e12; // WETH in USDC
@@ -239,7 +266,7 @@ export async function rebalancePosition(options: RebalanceOptions): Promise<Reba
             const approveSwapData = encodeFunctionData({
                 abi: Constants.ERC20_ABI,
                 functionName: 'approve',
-                args: [Constants.SWAP_ROUTER, excessWethWei],
+                args: [Constants.SWAP_ROUTER, maxUint256],
             });
 
             preparedTransactions.push({
@@ -265,6 +292,7 @@ export async function rebalancePosition(options: RebalanceOptions): Promise<Reba
                             tokenOut: token1,
                             fee,
                             recipient: options.account as `0x${string}`,
+                            deadline,
                             amountIn: excessWethWei,
                             amountOutMinimum: amountOutMin,
                             sqrtPriceLimitX96: 0n,
@@ -307,7 +335,7 @@ export async function rebalancePosition(options: RebalanceOptions): Promise<Reba
             const approveSwapData = encodeFunctionData({
                 abi: Constants.ERC20_ABI,
                 functionName: 'approve',
-                args: [Constants.SWAP_ROUTER, excessUsdcUnits],
+                args: [Constants.SWAP_ROUTER, maxUint256],
             });
 
             preparedTransactions.push({
@@ -333,6 +361,7 @@ export async function rebalancePosition(options: RebalanceOptions): Promise<Reba
                             tokenOut: token0,
                             fee,
                             recipient: options.account as `0x${string}`,
+                            deadline,
                             amountIn: excessUsdcUnits,
                             amountOutMinimum: amountOutMin,
                             sqrtPriceLimitX96: 0n,
@@ -369,10 +398,14 @@ export async function rebalancePosition(options: RebalanceOptions): Promise<Reba
         functionName: 'tickSpacing',
     });
 
-    const currentTickAligned = Math.floor(currentTick / Number(tickSpacing)) * Number(tickSpacing);
+    const tickSpacingNum = Number(tickSpacing);
+    const currentTickAligned = Math.floor(currentTick / tickSpacingNum) * tickSpacingNum;
     const rangeWidth = options.rangeWidth || 200;
     const newTickLower = currentTickAligned - rangeWidth;
     const newTickUpper = currentTickAligned + rangeWidth;
+
+    console.log(`[Rebalance Service] Current Pool Tick: ${currentTick} (Aligned: ${currentTickAligned}), Tick Spacing: ${tickSpacingNum}`);
+    console.log(`[Rebalance Service] Target Position Range: [${newTickLower}, ${newTickUpper}] (Width: ${newTickUpper - newTickLower} ticks / ±${rangeWidth} ticks)`);
 
     const approveMintToken0Data = encodeFunctionData({
         abi: Constants.ERC20_ABI,
@@ -400,7 +433,15 @@ export async function rebalancePosition(options: RebalanceOptions): Promise<Reba
         data: approveMintToken1Data,
     });
 
-    const { amount0Min, amount1Min } = calculateSlippageBounds(bal0, bal1, 0.5);
+    const { amount0Desired: opt0, amount1Desired: opt1 } = calculateOptimalMintAmounts(
+        sqrtPriceX96,
+        newTickLower,
+        newTickUpper,
+        bal0,
+        bal1
+    );
+
+    const { amount0Min, amount1Min } = calculateSlippageBounds(opt0, opt1, 0.5);
 
     const mintData = encodeFunctionData({
         abi: Constants.NPM_ABI,
@@ -412,8 +453,8 @@ export async function rebalancePosition(options: RebalanceOptions): Promise<Reba
                 fee,
                 tickLower: newTickLower,
                 tickUpper: newTickUpper,
-                amount0Desired: bal0,
-                amount1Desired: bal1,
+                amount0Desired: opt0,
+                amount1Desired: opt1,
                 amount0Min,
                 amount1Min,
                 recipient: options.account as `0x${string}`,

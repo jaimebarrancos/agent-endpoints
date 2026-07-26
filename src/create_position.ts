@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { createPublicClient, http, encodeFunctionData, parseEther, formatEther, maxUint256 } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
 import * as Constants from '../constants.ts';
-import { calculateSlippageBounds } from './uniswap_api.ts';
+import { calculateSlippageBounds, calculateOptimalMintAmounts } from './uniswap_api.ts';
 
 export interface CreatePositionOptions {
     account: string;
@@ -12,6 +12,7 @@ export interface CreatePositionOptions {
     amount1Desired?: string;
     tickLower?: number;
     tickUpper?: number;
+    outOfRange?: boolean;
 }
 
 export interface PreparedTransaction {
@@ -58,15 +59,24 @@ export async function createPosition(options: CreatePositionOptions): Promise<Cr
     let tickLower: number;
     let tickUpper: number;
 
+    const tickSpacingNum = Number(tickSpacing);
+    const currentTickAligned = Math.floor(currentTick / tickSpacingNum) * tickSpacingNum;
+
     if (options.tickLower !== undefined && options.tickUpper !== undefined) {
         tickLower = options.tickLower;
         tickUpper = options.tickUpper;
+    } else if (options.outOfRange) {
+        const rangeWidth = options.rangeWidth || 20;
+        tickUpper = currentTickAligned - tickSpacingNum;
+        tickLower = tickUpper - rangeWidth;
     } else {
-        const currentTickAligned = Math.floor(currentTick / Number(tickSpacing)) * Number(tickSpacing);
         const rangeWidth = options.rangeWidth || 100;
         tickLower = currentTickAligned - rangeWidth;
         tickUpper = currentTickAligned + rangeWidth;
     }
+
+    console.log(`[Create Position Service] Current Pool Tick: ${currentTick} (Aligned: ${currentTickAligned}), Tick Spacing: ${tickSpacingNum}`);
+    console.log(`[Create Position Service] Target Position Range: [${tickLower}, ${tickUpper}] (Width: ${tickUpper - tickLower} ticks)`);
 
     const isWethToken0 = Constants.WETH_ADDRESS.toLowerCase() < Constants.USDC_ADDRESS.toLowerCase();
     const token0 = isWethToken0 ? Constants.WETH_ADDRESS : Constants.USDC_ADDRESS;
@@ -95,39 +105,97 @@ export async function createPosition(options: CreatePositionOptions): Promise<Cr
     let finalAmount0Desired: bigint;
     let finalAmount1Desired: bigint;
 
+    const gasBuffer = parseEther('0.0002');
+    const availableEth = ethBal > gasBuffer ? ethBal - gasBuffer : 0n;
+
     if (options.amount0Desired && options.amount1Desired) {
         finalAmount0Desired = BigInt(options.amount0Desired);
         finalAmount1Desired = BigInt(options.amount1Desired);
     } else if (bal0 > 0n && bal1 > 0n) {
         finalAmount0Desired = bal0;
         finalAmount1Desired = bal1;
-    } else {
-        // If wallet doesn't have both WETH and USDC, prepare deposit + swap if ETH is available
-        const wrapAmount = ethBal >= parseEther('2.1') ? parseEther('2.0') : ethBal > parseEther('0.2') ? ethBal - parseEther('0.1') : parseEther('1.0');
-
-        console.log(`[Create Position Service] Client has insufficient WETH/USDC balances. Adding deposit & swap steps for ${formatEther(wrapAmount)} ETH...`);
-
-        // Step 1: Deposit ETH -> WETH
+    } else if (bal0 === 0n && availableEth > 0n) {
         const depositData = encodeFunctionData({
             abi: Constants.WETH_ABI,
             functionName: 'deposit',
         });
 
-        preparedTransactions.push({
-            id: 'deposit_weth',
-            description: `Deposit ${formatEther(wrapAmount)} ETH into WETH`,
-            to: Constants.WETH_ADDRESS,
-            data: depositData,
-            value: wrapAmount.toString(),
-        });
+        if (bal1 > 0n) {
+            // Wallet has ETH and existing USDC: deposit available ETH into WETH, use existing USDC
+            preparedTransactions.push({
+                id: 'deposit_weth',
+                description: `Deposit ${formatEther(availableEth)} ETH into WETH`,
+                to: Constants.WETH_ADDRESS,
+                data: depositData,
+                value: availableEth.toString(),
+            });
 
-        // Step 2: Swap half WETH -> USDC
-        const swapWethAmount = wrapAmount / 2n;
+            finalAmount0Desired = isWethToken0 ? availableEth : bal1;
+            finalAmount1Desired = isWethToken0 ? bal1 : availableEth;
+        } else {
+            // Wallet has ETH but no USDC: deposit available ETH into WETH, swap 50% into USDC
+            preparedTransactions.push({
+                id: 'deposit_weth',
+                description: `Deposit ${formatEther(availableEth)} ETH into WETH`,
+                to: Constants.WETH_ADDRESS,
+                data: depositData,
+                value: availableEth.toString(),
+            });
+
+            const swapWethAmount = availableEth / 2n;
+
+            const approveSwapData = encodeFunctionData({
+                abi: Constants.ERC20_ABI,
+                functionName: 'approve',
+                args: [Constants.SWAP_ROUTER, maxUint256],
+            });
+
+            preparedTransactions.push({
+                id: 'approve_swap',
+                description: `Approve ${formatEther(swapWethAmount)} WETH for SwapRouter`,
+                to: Constants.WETH_ADDRESS,
+                data: approveSwapData,
+            });
+
+            const swapData = encodeFunctionData({
+                abi: Constants.ROUTER_ABI,
+                functionName: 'exactInputSingle',
+                args: [
+                    {
+                        tokenIn: Constants.WETH_ADDRESS,
+                        tokenOut: Constants.USDC_ADDRESS,
+                        fee: 500,
+                        recipient: options.account as `0x${string}`,
+                        deadline,
+                        amountIn: swapWethAmount,
+                        amountOutMinimum: 0n,
+                        sqrtPriceLimitX96: 0n,
+                    },
+                ],
+            });
+
+            preparedTransactions.push({
+                id: 'swap_weth_to_usdc',
+                description: `Swap ${formatEther(swapWethAmount)} WETH to USDC via SwapRouter`,
+                to: Constants.SWAP_ROUTER,
+                data: swapData,
+            });
+
+            const sqrtPriceNum = Number(sqrtPriceX96) / 2 ** 96;
+            const priceWethInUsdc = sqrtPriceNum * sqrtPriceNum * 1e12;
+            const estUsdcUnits = BigInt(Math.floor((Number(swapWethAmount) / 1e18) * priceWethInUsdc * 0.98));
+
+            finalAmount0Desired = isWethToken0 ? swapWethAmount : estUsdcUnits;
+            finalAmount1Desired = isWethToken0 ? estUsdcUnits : swapWethAmount;
+        }
+    } else if (bal0 > 0n && bal1 === 0n) {
+        // Wallet has WETH but no USDC: swap half WETH into USDC
+        const swapWethAmount = bal0 / 2n;
 
         const approveSwapData = encodeFunctionData({
             abi: Constants.ERC20_ABI,
             functionName: 'approve',
-            args: [Constants.SWAP_ROUTER, swapWethAmount],
+            args: [Constants.SWAP_ROUTER, maxUint256],
         });
 
         preparedTransactions.push({
@@ -146,6 +214,7 @@ export async function createPosition(options: CreatePositionOptions): Promise<Cr
                     tokenOut: Constants.USDC_ADDRESS,
                     fee: 500,
                     recipient: options.account as `0x${string}`,
+                    deadline,
                     amountIn: swapWethAmount,
                     amountOutMinimum: 0n,
                     sqrtPriceLimitX96: 0n,
@@ -160,13 +229,17 @@ export async function createPosition(options: CreatePositionOptions): Promise<Cr
             data: swapData,
         });
 
-        // Estimate USDC from price
         const sqrtPriceNum = Number(sqrtPriceX96) / 2 ** 96;
         const priceWethInUsdc = sqrtPriceNum * sqrtPriceNum * 1e12;
         const estUsdcUnits = BigInt(Math.floor((Number(swapWethAmount) / 1e18) * priceWethInUsdc * 0.98));
 
         finalAmount0Desired = isWethToken0 ? swapWethAmount : estUsdcUnits;
         finalAmount1Desired = isWethToken0 ? estUsdcUnits : swapWethAmount;
+    } else {
+        throw new Error(
+            `Insufficient funds in account ${options.account} to create position. ` +
+            `ETH: ${formatEther(ethBal)}, WETH: ${formatEther(bal0)}, USDC: $${(Number(bal1) / 1e6).toFixed(2)}.`
+        );
     }
 
     // Step 3: Approve PositionManager for token0 and token1
@@ -197,6 +270,17 @@ export async function createPosition(options: CreatePositionOptions): Promise<Cr
     });
 
     // Step 4: Mint position
+    const { amount0Desired: optAmount0, amount1Desired: optAmount1 } = calculateOptimalMintAmounts(
+        sqrtPriceX96,
+        tickLower,
+        tickUpper,
+        finalAmount0Desired,
+        finalAmount1Desired
+    );
+
+    finalAmount0Desired = optAmount0;
+    finalAmount1Desired = optAmount1;
+
     const { amount0Min, amount1Min } = calculateSlippageBounds(finalAmount0Desired, finalAmount1Desired, 0.5);
 
     const mintData = encodeFunctionData({

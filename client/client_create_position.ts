@@ -59,9 +59,14 @@ export async function runCreatePositionClient() {
     console.log(`=============================================================`);
 
     const initialBalances = await fetchClientBalances(walletB.address);
-    console.log(`\n[Client] Initial Payments Wallet Balances:`);
+    console.log(`\n[Client] Initial Payments Wallet Balances (${walletB.address}):`);
     console.log(`  ETH:  ${formatEther(initialBalances.ethBal)} ETH`);
     console.log(`  USDC: $${(Number(initialBalances.usdcBal) / 1e6).toFixed(6)} USDC`);
+
+    const targetBalances = await fetchClientBalances(targetAccount as `0x${string}`);
+    console.log(`\n[Client] Target Client Wallet Balances (${targetAccount}):`);
+    console.log(`  ETH:  ${formatEther(targetBalances.ethBal)} ETH`);
+    console.log(`  USDC: $${(Number(targetBalances.usdcBal) / 1e6).toFixed(6)} USDC`);
 
     console.log('\n[Client] Requesting non-custodial position creation plan from /create-position with x402 payment...');
     try {
@@ -71,6 +76,8 @@ export async function runCreatePositionClient() {
             body: JSON.stringify({
                 account: targetAccount,
                 network: 'base-mainnet',
+                outOfRange: true,
+                rangeWidth: 20,
             }),
         });
 
@@ -83,6 +90,11 @@ export async function runCreatePositionClient() {
             console.log(` [Client] Executing ${data.preparedTransactions.length} Non-Custodial Transactions`);
             console.log(`=============================================================`);
 
+            let currentNonce = await publicClient.getTransactionCount({
+                address: clientAccount.address,
+                blockTag: 'pending',
+            });
+
             for (let i = 0; i < data.preparedTransactions.length; i++) {
                 const tx = data.preparedTransactions[i];
                 console.log(`\n[Client] Step ${i + 1}/${data.preparedTransactions.length}: ${tx.description} (${tx.id})`);
@@ -92,6 +104,7 @@ export async function runCreatePositionClient() {
                     to: tx.to,
                     data: tx.data,
                     value: tx.value ? BigInt(tx.value) : 0n,
+                    nonce: currentNonce++,
                 });
 
                 console.log(`  Tx Sent: ${hash}`);

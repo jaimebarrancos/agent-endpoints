@@ -99,6 +99,7 @@ async function runAutonomousAgent() {
                 body: JSON.stringify({
                     account: targetAccount,
                     network: 'base-mainnet',
+                    rangeWidth: 20,
                 }),
             });
 

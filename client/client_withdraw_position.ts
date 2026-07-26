@@ -89,6 +89,11 @@ export async function runWithdrawPositionClient() {
             console.log(` [Client] Executing ${data.preparedTransactions.length} Non-Custodial Withdrawal Transactions`);
             console.log(`=============================================================`);
 
+            let currentNonce = await publicClient.getTransactionCount({
+                address: clientAccount.address,
+                blockTag: 'pending',
+            });
+
             for (let i = 0; i < data.preparedTransactions.length; i++) {
                 const tx = data.preparedTransactions[i];
                 console.log(`\n[Client] Step ${i + 1}/${data.preparedTransactions.length}: ${tx.description} (${tx.id})`);
@@ -98,6 +103,7 @@ export async function runWithdrawPositionClient() {
                     to: tx.to,
                     data: tx.data,
                     value: tx.value ? BigInt(tx.value) : 0n,
+                    nonce: currentNonce++,
                 });
 
                 console.log(`  Tx Sent: ${hash}`);

@@ -86,6 +86,7 @@ export async function withdrawPosition(options: WithdrawPositionOptions): Promis
     const MAX_UINT128 = (1n << 128n) - 1n;
 
     const preparedTransactions: PreparedTransaction[] = [];
+    const calls: `0x${string}`[] = [];
 
     // Step 1: Decrease Liquidity (if liquidity > 0)
     if (liquidityToDecrease > 0n) {
@@ -102,13 +103,7 @@ export async function withdrawPosition(options: WithdrawPositionOptions): Promis
                 },
             ],
         });
-
-        preparedTransactions.push({
-            id: 'decrease_liquidity',
-            description: `Decrease Liquidity by ${pct}% (${liquidityToDecrease.toString()} units) for Position #${targetTokenId}`,
-            to: positionManagerAddress,
-            data: decreaseData,
-        });
+        calls.push(decreaseData);
     }
 
     // Step 2: Collect accumulated tokens & fees
@@ -124,29 +119,33 @@ export async function withdrawPosition(options: WithdrawPositionOptions): Promis
             },
         ],
     });
-
-    preparedTransactions.push({
-        id: 'collect_tokens',
-        description: `Collect all underlying tokens and fees for Position #${targetTokenId} to ${account}`,
-        to: positionManagerAddress,
-        data: collectData,
-    });
+    calls.push(collectData);
 
     // Step 3: Burn NFT if 100% full withdrawal and remaining liquidity will be 0
-    if (pct === 100 || remainingLiquidity === 0n) {
+    const isFullBurn = pct === 100 || remainingLiquidity === 0n;
+    if (isFullBurn) {
         const burnData = encodeFunctionData({
             abi: Constants.NPM_ABI,
             functionName: 'burn',
             args: [targetTokenId],
         });
-
-        preparedTransactions.push({
-            id: 'burn_position_nft',
-            description: `Burn empty Position #${targetTokenId} NFT`,
-            to: positionManagerAddress,
-            data: burnData,
-        });
+        calls.push(burnData);
     }
+
+    const multicallData = encodeFunctionData({
+        abi: Constants.NPM_ABI,
+        functionName: 'multicall',
+        args: [calls],
+    });
+
+    preparedTransactions.push({
+        id: isFullBurn ? 'withdraw_collect_burn' : 'withdraw_collect',
+        description: isFullBurn
+            ? `Atomic Decrease Liquidity, Collect tokens & Burn Position #${targetTokenId} NFT`
+            : `Atomic Decrease Liquidity (${pct}%) & Collect tokens for Position #${targetTokenId}`,
+        to: positionManagerAddress,
+        data: multicallData,
+    });
 
     return {
         success: true,

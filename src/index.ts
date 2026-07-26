@@ -234,11 +234,19 @@ const handleRebalance = async (req: Request, res: Response) => {
             return;
         }
 
+        const rangeWidth =
+            req.query.rangeWidth !== undefined
+                ? Number(req.query.rangeWidth)
+                : req.body?.rangeWidth !== undefined
+                    ? Number(req.body.rangeWidth)
+                    : undefined;
+
         console.log(`[Server] Generating non-custodial rebalance plan for account: ${account} on network: ${network}`);
         const result = await rebalancePosition({
             account,
             tokenId: tokenId ? String(tokenId) : undefined,
             network,
+            rangeWidth,
         });
 
         res.json(result);
@@ -311,6 +319,13 @@ const handleCreatePosition = async (req: Request, res: Response) => {
         const amount0Desired = (req.query.amount0Desired || req.body?.amount0Desired) as string | undefined;
         const amount1Desired = (req.query.amount1Desired || req.body?.amount1Desired) as string | undefined;
 
+        const outOfRange =
+            req.query.outOfRange !== undefined
+                ? req.query.outOfRange === 'true' || req.query.outOfRange === '1'
+                : req.body?.outOfRange !== undefined
+                    ? Boolean(req.body.outOfRange)
+                    : undefined;
+
         if (!account) {
             res.status(400).json({
                 error: 'Missing required parameter "account". Provide ?account=0x... or JSON body {"account": "0x..."}',
@@ -325,6 +340,7 @@ const handleCreatePosition = async (req: Request, res: Response) => {
             rangeWidth,
             amount0Desired,
             amount1Desired,
+            outOfRange,
         });
 
         res.json(result);
